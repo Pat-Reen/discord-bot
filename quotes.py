@@ -195,6 +195,8 @@ QUOTES = [
 # Keywords that might indicate a Vonnegut-related post
 VONNEGUT_KEYWORDS = [
     "vonnegut",
+    "vonnebot",
+    "kurt",
     "kurt vonnegut",
     "slaughterhouse",
     "slaughterhouse-five",
