@@ -1,8 +1,9 @@
 """
-Kurt Vonnebot — A Discord bot that replies with Kurt Vonnegut quotes.
+Kurt Vonnebot — A Discord bot that replies with Kurt Vonnegut quotes and AI responses.
 
-The bot monitors messages for Vonnegut-related keywords and replies with a
-randomly selected quote. It also exposes a /quote slash command for on-demand use.
+The bot monitors messages for Vonnegut-related keywords and replies with either a
+randomly selected quote or an AI-generated response in Vonnegut's voice. It also
+exposes a /quote slash command for on-demand use.
 """
 
 import logging
@@ -14,6 +15,7 @@ from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 
+from ai import get_ai_response
 from quotes import QUOTES, VONNEGUT_KEYWORDS
 
 load_dotenv()
@@ -104,14 +106,32 @@ async def on_message(message: discord.Message):
         return
 
     if contains_keyword(message.content):
-        quote = random_quote()
-        await message.reply(embed=build_embed(quote), mention_author=False)
-        log.info(
-            "Replied to %s in #%s: %.60s",
-            message.author,
-            message.channel,
-            message.content,
-        )
+        if random.random() < 0.5:
+            # Return a quote
+            quote = random_quote()
+            await message.reply(embed=build_embed(quote), mention_author=False)
+            log.info(
+                "Quote reply to %s in #%s: %.60s",
+                message.author,
+                message.channel,
+                message.content,
+            )
+        else:
+            # Generate an AI response in Vonnegut's voice
+            async with message.channel.typing():
+                try:
+                    response = await get_ai_response(message.content)
+                    await message.reply(response, mention_author=False)
+                    log.info(
+                        "AI reply to %s in #%s: %.60s",
+                        message.author,
+                        message.channel,
+                        message.content,
+                    )
+                except Exception as exc:
+                    log.error("AI response failed, falling back to quote: %s", exc)
+                    quote = random_quote()
+                    await message.reply(embed=build_embed(quote), mention_author=False)
 
     # Allow prefix commands to still work
     await bot.process_commands(message)
