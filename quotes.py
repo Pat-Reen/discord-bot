@@ -3,10 +3,6 @@
 QUOTES = [
     # Slaughterhouse-Five
     {
-        "text": "So it goes.",
-        "source": "Slaughterhouse-Five",
-    },
-    {
         "text": "We are what we pretend to be, so we must be careful about what we pretend to be.",
         "source": "Mother Night",
     },
@@ -16,10 +12,6 @@ QUOTES = [
     },
     {
         "text": "Billy Pilgrim has come unstuck in time.",
-        "source": "Slaughterhouse-Five",
-    },
-    {
-        "text": "Listen: Billy Pilgrim has come unstuck in time.",
         "source": "Slaughterhouse-Five",
     },
     {
@@ -36,10 +28,6 @@ QUOTES = [
     },
     {
         "text": "Of all the words of mice and men, the saddest are, 'It might have been.'",
-        "source": "Cat's Cradle",
-    },
-    {
-        "text": "Tiger got to hunt, bird got to fly; Man got to sit and wonder 'why, why, why?' Tiger got to sleep, bird got to land; Man got to tell himself he understand.",
         "source": "Cat's Cradle",
     },
     {
@@ -211,26 +199,14 @@ VONNEGUT_KEYWORDS = [
     "slaughterhouse",
     "slaughterhouse-five",
     "slaughterhouse five",
-    "cats cradle",
-    "cat's cradle",
     "breakfast of champions",
     "mother night",
     "sirens of titan",
-    "player piano",
     "god bless you mr rosewater",
-    "timequake",
-    "bluebeard",
-    "galapagos",
-    "slapstick",
-    "deadeye dick",
     "so it goes",
-    "vonnebot",
-    "vonnecut",
     "billy pilgrim",
     "tralfamadore",
     "tralfamadorian",
-    "bokononism",
-    "bokonon",
     "ice-nine",
     "ice nine",
     "granfalloon",
