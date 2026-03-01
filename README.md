@@ -1,6 +1,7 @@
 # Kurt Vonnebot
 
-A Reddit bot that replies to posts and comments with quotes from Kurt Vonnegut's books.
+A Discord bot that replies with Kurt Vonnegut quotes whenever someone mentions
+him, his books, or related keywords. Also exposes a `/quote` slash command.
 
 So it goes.
 
@@ -8,10 +9,11 @@ So it goes.
 
 ## How it works
 
-Vonnebot monitors one or more subreddits for new posts and comments. When it
-finds text that mentions Vonnegut, his books, or related keywords
-(`slaughterhouse-five`, `billy pilgrim`, `tralfamadore`, `so it goes`, …), it
-replies with a randomly selected Vonnegut quote, attributed to its source.
+Vonnebot listens to messages in your server. When it spots a Vonnegut-related
+keyword (`slaughterhouse-five`, `billy pilgrim`, `tralfamadore`, `so it goes`, …),
+it replies with a randomly selected quote as a Discord embed.
+
+You can also summon a quote at any time with the `/quote` slash command.
 
 Example reply:
 
@@ -20,30 +22,35 @@ Example reply:
 > about a hundred years here. There's only one rule that I know of, babies —
 > God damn it, you've got to be kind."*
 >
-> — Kurt Vonnegut, **God Bless You, Mr. Rosewater**
->
-> ---
-> ^(I am Kurt Vonnebot. So it goes.)
+> — Kurt Vonnegut, God Bless You, Mr. Rosewater  |  So it goes.
 
 ---
 
 ## Setup
 
-### 1. Create a Reddit app
+### 1. Create a Discord application and bot
 
-1. Go to <https://www.reddit.com/prefs/apps> and click **create another app**.
-2. Choose **script** as the app type.
-3. Note your **client ID** (under the app name) and **client secret**.
+1. Go to <https://discord.com/developers/applications> and click **New Application**.
+2. Give it a name (e.g. "KurtVonnebot"), then open the **Bot** tab.
+3. Click **Add Bot** and confirm.
+4. Under **Token**, click **Reset Token** and copy it — you'll need it in step 4.
+5. Under **Privileged Gateway Intents**, enable **Message Content Intent**.
 
-### 2. Create a bot Reddit account
+### 2. Invite the bot to your server
 
-Register a separate Reddit account for the bot (e.g. `u/KurtVonnebot`).
+1. In your application, open the **OAuth2 → URL Generator** tab.
+2. Under **Scopes**, check `bot` and `applications.commands`.
+3. Under **Bot Permissions**, check at minimum:
+   - `Read Messages / View Channels`
+   - `Send Messages`
+   - `Read Message History`
+4. Copy the generated URL, open it in your browser, and add the bot to your server.
 
 ### 3. Clone and install
 
 ```bash
 git clone <repo-url>
-cd reddit-bot
+cd discord-bot
 python -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -55,19 +62,12 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` and fill in your credentials:
+Edit `.env` and fill in your values:
 
 | Variable | Description |
 |---|---|
-| `REDDIT_CLIENT_ID` | App client ID from reddit.com/prefs/apps |
-| `REDDIT_CLIENT_SECRET` | App client secret |
-| `REDDIT_USERNAME` | Bot account username |
-| `REDDIT_PASSWORD` | Bot account password |
-| `SUBREDDITS` | Comma-separated list of subreddits to monitor |
-| `FETCH_LIMIT` | Posts/comments fetched per cycle (default `25`) |
-| `POLL_INTERVAL` | Seconds between cycles (default `60`) |
-| `REPLY_TO_COMMENTS` | `true` to reply to comments too (default `true`) |
-| `REPLIED_FILE` | Path to ID-tracking file (default `replied.txt`) |
+| `DISCORD_TOKEN` | Bot token from the Developer Portal |
+| `WATCH_CHANNELS` | Comma-separated channel IDs to watch (blank = all channels) |
 
 ### 5. Run
 
@@ -77,13 +77,16 @@ python bot.py
 
 The bot logs activity to both the terminal and `vonnebot.log`.
 
+On first start it syncs the `/quote` slash command globally. Discord can take up
+to an hour to propagate new slash commands across all servers — this is normal.
+
 ---
 
 ## Project structure
 
 ```
-reddit-bot/
-├── bot.py          # Main bot loop and Reddit logic
+discord-bot/
+├── bot.py          # Main bot logic (events + slash command)
 ├── quotes.py       # Vonnegut quotes and trigger keywords
 ├── requirements.txt
 ├── .env.example    # Template for credentials (never commit .env)
@@ -103,16 +106,4 @@ Open `quotes.py` and append a dict to the `QUOTES` list:
 },
 ```
 
-To add new trigger keywords, append to the `VONNEGUT_KEYWORDS` list in the
-same file.
-
----
-
-## Notes
-
-- Reddit's API rate-limits bots to roughly 60 requests per minute.  The
-  default `POLL_INTERVAL=60` keeps the bot well within limits.
-- Vonnebot never replies to its own comments, and it tracks replied IDs in
-  `replied.txt` to avoid duplicate replies across restarts.
-- Avoid adding the bot to very large, active subreddits without adjusting
-  `FETCH_LIMIT` and `POLL_INTERVAL` accordingly.
+To add new trigger keywords, append to `VONNEGUT_KEYWORDS` in the same file.

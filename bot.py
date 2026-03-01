@@ -1,18 +1,17 @@
 """
-Kurt Vonnebot — A Reddit bot that replies to posts with Kurt Vonnegut quotes.
+Kurt Vonnebot — A Discord bot that replies with Kurt Vonnegut quotes.
 
-The bot monitors configured subreddits and replies when a post or comment
-mentions Vonnegut, his books, or known trigger keywords.  It tracks which
-items it has already replied to so it never double-posts.
+The bot monitors messages for Vonnegut-related keywords and replies with a
+randomly selected quote. It also exposes a /quote slash command for on-demand use.
 """
 
 import logging
 import os
 import random
-import time
-from pathlib import Path
 
-import praw
+import discord
+from discord import app_commands
+from discord.ext import commands
 from dotenv import load_dotenv
 
 from quotes import QUOTES, VONNEGUT_KEYWORDS
@@ -35,51 +34,31 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Config — read from environment variables (see .env.example)
 # ---------------------------------------------------------------------------
-REDDIT_CLIENT_ID = os.environ["REDDIT_CLIENT_ID"]
-REDDIT_CLIENT_SECRET = os.environ["REDDIT_CLIENT_SECRET"]
-REDDIT_USERNAME = os.environ["REDDIT_USERNAME"]
-REDDIT_PASSWORD = os.environ["REDDIT_PASSWORD"]
-REDDIT_USER_AGENT = os.environ.get(
-    "REDDIT_USER_AGENT",
-    f"script:KurtVonnebot:v1.0 (by u/{os.environ.get('REDDIT_USERNAME', 'vonnebot')})",
+DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
+
+# Optional: comma-separated channel IDs to watch for keyword triggers.
+# Leave blank (or unset) to monitor every channel in every server.
+_watch_raw = os.environ.get("WATCH_CHANNELS", "").strip()
+WATCH_CHANNELS: set[int] = (
+    {int(c.strip()) for c in _watch_raw.split(",") if c.strip()}
+    if _watch_raw
+    else set()
 )
 
-# Comma-separated list of subreddits to monitor, e.g. "books,literature,scifi"
-SUBREDDITS = os.environ.get("SUBREDDITS", "books,literature,scifi,AskReddit").split(",")
-SUBREDDITS = [s.strip() for s in SUBREDDITS]
+# ---------------------------------------------------------------------------
+# Bot setup
+# ---------------------------------------------------------------------------
+intents = discord.Intents.default()
+intents.message_content = True  # required to read message text
 
-# How many posts/comments to fetch per poll cycle
-FETCH_LIMIT = int(os.environ.get("FETCH_LIMIT", "25"))
-
-# Seconds to wait between poll cycles (Reddit rate-limit friendly default)
-POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "60"))
-
-# Reply to comments as well as posts?
-REPLY_TO_COMMENTS = os.environ.get("REPLY_TO_COMMENTS", "true").lower() == "true"
-
-# Path to the file that stores IDs of already-replied items
-REPLIED_FILE = Path(os.environ.get("REPLIED_FILE", "replied.txt"))
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def load_replied_ids() -> set:
-    """Load the set of Reddit IDs we have already replied to."""
-    if not REPLIED_FILE.exists():
-        return set()
-    return set(REPLIED_FILE.read_text().splitlines())
-
-
-def save_replied_id(item_id: str, replied_ids: set) -> None:
-    """Persist a new ID to the replied file and add it to the in-memory set."""
-    replied_ids.add(item_id)
-    with REPLIED_FILE.open("a") as fh:
-        fh.write(item_id + "\n")
-
-
 def contains_keyword(text: str) -> bool:
-    """Return True if *text* contains any Vonnegut-related keyword."""
+    """Return True if text contains any Vonnegut-related keyword."""
     lowered = text.lower()
     return any(kw in lowered for kw in VONNEGUT_KEYWORDS)
 
@@ -89,108 +68,70 @@ def random_quote() -> dict:
     return random.choice(QUOTES)
 
 
-def format_reply(quote: dict) -> str:
-    """Format a quote into a Reddit-friendly markdown reply."""
-    return (
-        f'> *"{quote["text"]}"*\n\n'
-        f"— Kurt Vonnegut, **{quote['source']}**\n\n"
-        "---\n"
-        "^(I am Kurt Vonnebot. So it goes.)"
+def build_embed(quote: dict) -> discord.Embed:
+    """Format a quote as a Discord embed."""
+    embed = discord.Embed(
+        description=f'*"{quote["text"]}"*',
+        color=discord.Color.dark_gold(),
     )
-
-
-def build_reddit() -> praw.Reddit:
-    """Initialise and return an authenticated PRAW Reddit instance."""
-    return praw.Reddit(
-        client_id=REDDIT_CLIENT_ID,
-        client_secret=REDDIT_CLIENT_SECRET,
-        username=REDDIT_USERNAME,
-        password=REDDIT_PASSWORD,
-        user_agent=REDDIT_USER_AGENT,
-    )
+    embed.set_footer(text=f'— Kurt Vonnegut, {quote["source"]}  |  So it goes.')
+    return embed
 
 
 # ---------------------------------------------------------------------------
-# Core bot logic
+# Events
 # ---------------------------------------------------------------------------
 
-def process_submission(submission, replied_ids: set, reddit: praw.Reddit) -> None:
-    """Reply to a submission (post) if it matches and hasn't been replied to."""
-    if submission.id in replied_ids:
-        return
-
-    text = f"{submission.title} {submission.selftext}"
-    if not contains_keyword(text):
-        return
-
-    quote = random_quote()
-    reply_text = format_reply(quote)
-
+@bot.event
+async def on_ready():
+    log.info("Logged in as %s (ID: %s)", bot.user, bot.user.id)
     try:
-        submission.reply(reply_text)
-        save_replied_id(submission.id, replied_ids)
-        log.info("Replied to submission %s: '%s'", submission.id, submission.title[:60])
-    except praw.exceptions.APIException as exc:
-        log.warning("API error replying to submission %s: %s", submission.id, exc)
+        synced = await bot.tree.sync()
+        log.info("Synced %d slash command(s)", len(synced))
     except Exception as exc:
-        log.error("Unexpected error replying to submission %s: %s", submission.id, exc)
+        log.error("Failed to sync slash commands: %s", exc)
 
 
-def process_comment(comment, replied_ids: set) -> None:
-    """Reply to a comment if it matches and hasn't been replied to."""
-    if comment.id in replied_ids:
+@bot.event
+async def on_message(message: discord.Message):
+    # Never reply to ourselves
+    if message.author == bot.user:
         return
 
-    # Don't reply to ourselves
-    if comment.author and comment.author.name.lower() == REDDIT_USERNAME.lower():
+    # If WATCH_CHANNELS is configured, ignore other channels
+    if WATCH_CHANNELS and message.channel.id not in WATCH_CHANNELS:
+        await bot.process_commands(message)
         return
 
-    if not contains_keyword(comment.body):
-        return
+    if contains_keyword(message.content):
+        quote = random_quote()
+        await message.reply(embed=build_embed(quote), mention_author=False)
+        log.info(
+            "Replied to %s in #%s: %.60s",
+            message.author,
+            message.channel,
+            message.content,
+        )
 
+    # Allow prefix commands to still work
+    await bot.process_commands(message)
+
+
+# ---------------------------------------------------------------------------
+# Slash commands
+# ---------------------------------------------------------------------------
+
+@bot.tree.command(name="quote", description="Get a random Kurt Vonnegut quote")
+async def quote_command(interaction: discord.Interaction):
     quote = random_quote()
-    reply_text = format_reply(quote)
-
-    try:
-        comment.reply(reply_text)
-        save_replied_id(comment.id, replied_ids)
-        log.info("Replied to comment %s by u/%s", comment.id, comment.author)
-    except praw.exceptions.APIException as exc:
-        log.warning("API error replying to comment %s: %s", comment.id, exc)
-    except Exception as exc:
-        log.error("Unexpected error replying to comment %s: %s", comment.id, exc)
+    await interaction.response.send_message(embed=build_embed(quote))
+    log.info("/quote used by %s in #%s", interaction.user, interaction.channel)
 
 
-def run() -> None:
-    """Main bot loop."""
-    log.info("Starting Kurt Vonnebot…")
-    log.info("Monitoring subreddits: %s", ", ".join(SUBREDDITS))
-
-    reddit = build_reddit()
-    replied_ids = load_replied_ids()
-    subreddit = reddit.subreddit("+".join(SUBREDDITS))
-
-    log.info("Logged in as u/%s", reddit.user.me())
-
-    while True:
-        try:
-            # --- New submissions ---
-            for submission in subreddit.new(limit=FETCH_LIMIT):
-                process_submission(submission, replied_ids, reddit)
-
-            # --- New comments (optional) ---
-            if REPLY_TO_COMMENTS:
-                for comment in subreddit.comments(limit=FETCH_LIMIT):
-                    process_comment(comment, replied_ids)
-
-        except praw.exceptions.PRAWException as exc:
-            log.error("PRAW exception during poll: %s", exc)
-        except Exception as exc:
-            log.error("Unexpected exception during poll: %s", exc)
-
-        log.debug("Sleeping %d seconds…", POLL_INTERVAL)
-        time.sleep(POLL_INTERVAL)
-
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    run()
+    log.info("Starting Kurt Vonnebot…")
+    bot.run(DISCORD_TOKEN, log_handler=None)
